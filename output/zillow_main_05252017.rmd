@@ -1,0 +1,333 @@
+---
+title: "Zillow EDA Tax Prices"
+output: html_notebook
+---
+
+####This is my first kaggle kernel.
+####It attempts to follow along from Philipp Spachtholz's Exploratory Analysis - Zillow
+####using data.tables when possible instead of dplyr.
+
+####Goal is to ultimately use the tax information + lat lon to do some cool mapping and learn leaftlet
+
+
+
+Loads packages
+```{r setup, echo=FALSE}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+getwd()
+library(ggplot2)
+library(DescTools)
+library(lubridate)
+library(plyr)
+library(dplyr)
+library(magrittr)
+library(ggthemes)
+library(data.table)
+library(caret)
+library(viridis)
+library(leaflet)
+
+theme_set(theme_economist_white())
+options(scipen = 0)
+```
+<!--
+Loads in data using fread from data.table
+```{r ghostdataload, include=FALSE, echo=FALSE}
+raw_properties <- as.data.table(fread('../input/properties_2016.csv', showProgress = TRUE))
+
+raw_train <- as.data.table(fread('../input/train_2016.csv', showProgress = TRUE))
+
+#useless dataframe for now, formatting for later
+raw_sample_submission <- as.data.table(fread('../input/sample_submission.csv', showProgress = TRUE))
+
+```
+-->
+
+
+
+
+<!--
+Creates smaller dataframe that won't crash
+```{r reducefilesize, include=FALSE, echo=FALSE}
+
+
+
+set.seed(1618)
+reductionsize <- .10
+
+smallIndex <- createDataPartition(raw_train$parcelid, p = reductionsize,  list = FALSE, times = 1)
+
+small_train<- raw_train[smallIndex]
+
+#need to learn how to better way to subset in data.tables
+small_properties <- (raw_properties[parcelid %in% small_train$parcelid])
+
+saveRDS(raw_properties,'../output/properties.rds')
+saveRDS(raw_train,'../output/train.rds')
+saveRDS(small_properties,'../output/small_properties.rds')
+saveRDS(small_train,'../output/small_train.rds')
+
+```
+-->
+
+
+```{r maindataload, echo=FALSE}
+#df_properties <- readRDS('../output/raw_properties.rds')
+#df_transactions <- readRDS('../output/raw_train.rds')
+
+df_properties <- readRDS('../output/small_properties.rds')
+df_transactions <- readRDS('../output/small_train.rds')
+
+```
+
+Makes our data more user friendly by renaming colnames
+```{r dataprep_renamecol, echo=FALSE, include=FALSE}
+
+
+#colname changes copied from Philipp Spachtholz's Exploratory Analysis - Zillow
+# converted to data.tables setnames function instead of rename in dplyr
+setnames(df_properties, old=c( 'parcelid',
+                      'yearbuilt',
+                      'basementsqft',
+                      'yardbuildingsqft17',
+                      'yardbuildingsqft26',
+                      'poolsizesum',
+                      'lotsizesquarefeet',
+                      'garagetotalsqft',
+                      'finishedfloor1squarefeet',
+                      'calculatedfinishedsquarefeet',
+                      'finishedsquarefeet6',
+                      'finishedsquarefeet12',
+                      'finishedsquarefeet13',
+                      'finishedsquarefeet15',
+                      'finishedsquarefeet50',
+                      'unitcnt',
+                      'numberofstories',
+                      'roomcnt',
+                      'bathroomcnt',
+                      'bedroomcnt',
+                      'calculatedbathnbr',
+                      'fullbathcnt',
+                      'threequarterbathnbr',
+                      'fireplacecnt',
+                      'poolcnt',
+                      'garagecarcnt',
+                      'regionidcounty',
+                      'regionidcity',
+                      'regionidzip',
+                      'regionidneighborhood',
+                      'fireplaceflag',
+                      'hashottuborspa',
+                      'buildingqualitytypeid',
+                      'buildingclasstypeid',
+                      'typeconstructiontypeid',
+                      'decktypeid',
+                      'storytypeid',
+                      'heatingorsystemtypeid',
+                      'airconditioningtypeid',
+                      'architecturalstyletypeid',
+                      'taxvaluedollarcnt',
+                      'landtaxvaluedollarcnt',
+                      'structuretaxvaluedollarcnt',
+                      'assessmentyear'), 
+         
+              new=c('id_parcel',
+                    'year_built',
+                    'area_basement',
+                    'area_patio',
+                    'area_shed',
+                    'area_pool',
+                    'area_lot',
+                    'area_garage',
+                    'area_firstfloor_finished',
+                    'area_total_calc',
+                    'area_base',
+                    'area_live_finished',
+                    'area_liveperi_finished',
+                    'area_total_finished',
+                    'area_unknown',
+                    'num_unit',
+                    'num_story',
+                    'num_room',
+                    'num_bathroom',
+                    'num_bedroom',
+                    'num_bathroom_calc',
+                    'num_bath',
+                    'num_75_bath',
+                    'num_fireplace',
+                    'num_pool',
+                    'num_garage',
+                    'region_county',
+                    'region_city',
+                    'region_zip',
+                    'region_neighbor',
+                    'flag_fireplace',
+                    'flag_tub',
+                    'quality',
+                    'framing',
+                    'material',
+                    'deck',
+                    'story',
+                    'heating',
+                    'aircon',
+                    'architectural_style',
+                    'tax_totalvalue',
+                    'tax_landvalue',
+                    'tax_structurevalue',
+                    'year_taxasessment'
+              )
+         )
+
+#converts df_transactions
+setnames(df_transactions, old = c('parcelid', 'transactiondate'),
+                          new = c('id_parcel', 'date_of_transact')
+         )
+
+```
+
+###Explores transactions by timeframe.
+
+Pretty boring so far, no real insights. 
+```{r edatransaction}
+df_transactions[, date_of_transact:= as.Date(date_of_transact)]
+df_transactions[, month_of_transact:= month(date_of_transact)]
+df_transactions[, year_of_transact:= year(date_of_transact)]
+df_transactions[, year_month_transact:= make_date(year=year(date_of_transact),month=month(date_of_transact))]
+
+#need to add unique() here
+#transacts_per_year <- df_transactions[, N := uniqueN(id_parcel), by = year_month_transact]
+
+transacts_per_year <- df_transactions[, .N, by = year_month_transact]
+transacts_per_day <- df_transactions[, .N, by = date_of_transact]
+
+
+ggplot(transacts_per_year,aes(x=year_month_transact,y=N)) + geom_bar(stat="identity", fill="dodgerblue2")
+
+ggplot(transacts_per_day,aes(x=date_of_transact,y=N)) + geom_bar(stat="identity", fill="dodgerblue2")
+
+
+```
+
+Plots some exploratory analysis by tax data
+
+First up a frequency plot by the different tax values for land and structure
+```{r taxpricehistogram, fig.width=12, fig.height=8}
+long_tax <- melt(df_properties,
+                 id.vars = c("id_parcel"),
+                 measure.vars = c("tax_totalvalue", "tax_landvalue", "tax_structurevalue"),
+                 variable.name = "tax_type", 
+                 value.name = "tax_value")
+
+str(long_tax)
+
+col_pal <- "Set1"
+
+ggplot(long_tax, aes(x=tax_value, colour = tax_type)) +
+  geom_line(stat="density", size=1.2) +   
+  theme_bw()+
+  scale_fill_brewer(palette=col_pal)+
+  scale_color_brewer(palette=col_pal) +
+  #stat_bin(binwidth = 50000) +
+  labs(title="Histogram for Price") +
+  scale_x_continuous(name = "tax_amount", breaks = 10^5*(0:12), limits = c(0, 10^6)) +
+  scale_y_continuous(name = "Frequency")
+
+```
+
+Linear buckets arn't cutting it
+```{r fig.width=12, fig.height=8}
+ggplot(df_properties, aes(tax_landvalue, tax_structurevalue))+ 
+    geom_hex(bins = 50) + coord_fixed() +
+    scale_fill_viridis() +
+    theme_bw() +
+  ggtitle("Frequency of Land vs. Structure Tax Value") +
+  theme(legend.position="right") +
+  xlim(0, 5*10^6) +
+  ylim(0, 5*10^6)
+  
+
+```
+
+Couldn't get viridis palette to work on a log scale hexbin so manually hacked my own using their color pallete.
+
+Still not that informative, but we see that the vast majority of properties are taxed at <$100k for both land and property in 2015.
+
+This is kinda a bummer, since I think the tax value may not gonnna be that close to the actual for sale value, wish I could buy houses in SoCal for <$100k.
+```{r fig.width=12, fig.height=8}
+ggplot(df_properties, aes(tax_landvalue, tax_structurevalue))+ 
+    geom_hex(bins = 30) + coord_fixed() +
+    scale_fill_gradientn(name = "Log Count", trans = "log10",
+                        breaks = 10^(0:6), colors = c("#440154","#21908d","#fde725")) +
+    theme_bw() +
+  ggtitle("Log Frequency Land vs. Structure Tax Value") +
+  theme(legend.position="right") +
+  xlim(0, 5*10^6) +
+  ylim(0, 5*10^6)
+```
+
+Using coordinate data we have a cool visual heatmap of where all our properties are in LA
+
+```{r maphexbin, fig.width=12, fig.height=12}
+df_properties[,lat:= latitude/1e06]
+df_properties[,lon:= longitude/1e06]
+
+ggplot(df_properties, aes(lat, lon))+ 
+    geom_hex(bins = 200) + coord_fixed() +
+    scale_fill_gradientn(name = "Number of Properties",
+                        breaks = 250*(0:8), colors = c("#440154","#21908d","#fde725")) +
+    theme_bw() +
+  ggtitle("Log Frequency Land vs. Structure Tax Value") +
+  theme(legend.position="right")
+
+```
+
+
+```{r map_data_prep}
+
+lat <- range(df_properties$latitude/1e06,na.rm=T)
+lon <- range(df_properties$longitude/1e06,na.rm=T)
+
+tmp <- df_properties %>%
+  select(id_parcel,longitude,latitude, tax_totalvalue) %>% 
+  mutate(lon=longitude/1e6,lat=latitude/1e6, logtax = log10(tax_totalvalue)) %>% 
+  select(id_parcel,lat,lon, logtax) %>% 
+  left_join(df_transactions,by="id_parcel")
+
+```
+
+Learning the leaflet package wee!
+This will help me make my interactive map of where I've traveled too.
+
+To be continued
+```{r include = FALSE, fig.width=12, fig.height=8}
+#can't figure out colors yet
+pal <- colorBin(viridis, tmp$logtax)
+
+
+leaflet(tmp) %>% 
+  addTiles() %>% 
+  fitBounds(lon[1],lat[1],lon[2],lat[2]) %>% 
+  addCircleMarkers(stroke=FALSE,
+                   fillOpacity = 0.5,
+                   clusterOptions = markerClusterOptions() 
+                   #~pal(logtax)
+                   ) %>% 
+  addMiniMap()
+
+```
+
+```{r fig.width=12, fig.height=8}
+library(ggmap)
+mapa <- get_map(location = c(lon = -118.255, lat = 34.049), zoom = 9, maptype = "hybrid")    
+
+ggmap(mapa) +
+  geom_point(data = df_properties, aes(x = lon, y = lat, color = tax_totalvalue, alpha = 0.8))+
+  scale_colour_gradient2(high = "darkred", mid = "yellow", low = "white", midpoint = median(df_properties$tax_totalvalue, na.rm = TRUE)/2, 
+  space = "Lab", na.value = "grey50", guide = "colourbar") +
+  scale_fill_viridis()
+
+median(df_properties$tax_totalvalue, na.rm = TRUE)
+
+hist(df_properties$tax_totalvalue)
+```
+
