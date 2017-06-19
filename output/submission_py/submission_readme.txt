@@ -1,0 +1,1 @@
+This folder is for thes script used to generate each submission
